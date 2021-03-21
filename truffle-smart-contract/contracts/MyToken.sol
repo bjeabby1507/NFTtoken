@@ -68,12 +68,12 @@ contract farmToken is ERC721 {
     } 
 
     // use URI : https://my-json-server.typicode.com/bjeab1507/NFTtoken/
-    function declareAnimal (string calldata tokenURI ,string calldata name) onlyBreeder
-        external
+    function declareAnimal (string memory tokenURI , string memory name) onlyBreeder 
+        public
         returns (uint256)
     {
         //features memory newfeatures = features(nom,rand() % 2000,rand() % 2000,rand() % 2000); // btw 0 and 2000
-        features memory newfeatures = features(name,random(),random(),random()); // btw 0 and 2000
+        features memory newfeatures = features(name,random()/10,random()+5,random()-23); // btw 0 and 2000
         _tokenIds.increment();
 
         // new token
@@ -86,17 +86,14 @@ contract farmToken is ERC721 {
 
         return newItemId;
     }
-
-    /** 
     function seeFeatures(uint256 tokenId) 
         public view 
         returns (string memory , uint256 , uint256 , uint256 )
     {
         return (characteristic[tokenId].name, characteristic[tokenId].PV, characteristic[tokenId].ATK, characteristic[tokenId].DEF );
     }
-    */
-
-    function deadAnimal(uint256 tokenId) onlyBreeder 
+    
+    function deadAnimal(uint256 tokenId)
         internal 
         returns(bool success)
     {
@@ -142,11 +139,31 @@ contract farmToken is ERC721 {
     }
     */
 
+    mapping (address => uint256) wanteedToken;
+    address payable[] wanter;
+    function wantTokenNb(uint256 token) onlyBreeder external returns(bool success) { // sign for the wanted token
+        require(Auction_Token[token].tokenId,'not on auction');
+        wanteedToken[msg.sender] = token;
+        wanter.push(payable(msg.sender));
+        return true;
+    }
+
     fallback() external payable {
-        // send back exces funds
-        emit GotPaid(msg.sender,msg.value);
-        msg.sender.sendValue(msg.value);
-        emit Refund(msg.sender,msg.value);
+        //emit GotPaid(msg.sender,msg.value);
+        if(IsIn(wanter, msg.sender)){
+            uint256 token = wanteedToken[msg.sender];
+            if(Auction_Token[token].tokenId){
+                bidOnAuction(token);
+            }
+            else{
+                msg.sender.sendValue(msg.value);
+                //emit Refund(msg.sender,msg.value);
+            }
+        }
+        else{
+            msg.sender.sendValue(msg.value); // send back exces funds
+            //emit Refund(msg.sender,msg.value);
+        }
     }
     //Auction 
 
@@ -196,7 +213,8 @@ contract farmToken is ERC721 {
         address payable[] memory users;
         uint256 biddingTime = 2;
         uint256 close = now + biddingTime * 1 days;
-        Auction memory newauction = Auction(newId,true, msg.sender,betstart,biddingTime,users,0,address(0),close,false);
+        uint256 onewei = 1 wei;
+        Auction memory newauction = Auction(newId,true, msg.sender,betstart*onewei,biddingTime,users,0,address(0),close,false);
         Auction_Token[tokenId] = newauction;
         openAuction.increment();
         auctions.push(newauction);
@@ -218,12 +236,12 @@ contract farmToken is ERC721 {
     //mapping (address => uint256) fundsByBidders;
     // is a payable function, when Ethers is send to the function, this Ether will be added to the balance of the contract
     function bidOnAuction(uint256 tokenId) onlyBreeder
-        external payable 
+        internal
         returns(bool bet)
     {
         //msg.sender.transfer(msg.value);
         require(now <= Auction_Token[tokenId].canceled, "end");
-        require(Auction_Token[tokenId].completed, "reward end");
+        require(!Auction_Token[tokenId].completed, "reward end");
         require(msg.value > 0, "send some ether");
         require(Auction_Token[tokenId].tokenId,'on auction');
         require(msg.value > Auction_Token[tokenId].start);
@@ -261,6 +279,7 @@ contract farmToken is ERC721 {
         }
     }
     }
+    /** 
     function getIndex(address payable[] memory name, address addr) internal pure returns(uint256) {
         for(uint256 i = 0 ; i<name.length ; i++) {
             if( name[i] == addr) {
@@ -268,6 +287,7 @@ contract farmToken is ERC721 {
         }
     }
     }
+    */
     function getHighestBid(uint256 bid , uint256 currentHighBid)
         internal pure
         returns (bool)
@@ -279,12 +299,19 @@ contract farmToken is ERC721 {
             return true;
         }
     }
+    function claimByForce(uint256 tokenId) onlyAdmin
+        external
+        returns (bool)
+    {
+        require(Auction_Token[tokenId].tokenId,'on auction');
+        Auction_Token[tokenId].canceled = now;
+    }
 
     function claimAuction(uint tokenId) onlyBreeder
         external 
         returns(bool success) 
     {
-        require(now > Auction_Token[tokenId].canceled, "not ended");
+        require(now >= Auction_Token[tokenId].canceled, "not ended");
         require(!Auction_Token[tokenId].completed, "reward ended");
         require(Auction_Token[tokenId].highestBidder == msg.sender);
 
@@ -295,6 +322,8 @@ contract farmToken is ERC721 {
         // payment
         uint256 pay = Auction_Token[tokenId].highestBid;
         Auction_Token[tokenId].owner.sendValue( pay);
+        delete wanteedToken[msg.sender];
+        delete Auction_Token[tokenId].bidders[msg.sender];
         Claimed(Auction_Token[tokenId].owner, msg.sender, tokenId);
         return true;
     }
@@ -303,24 +332,31 @@ contract farmToken is ERC721 {
         external
         returns(bool success)
     {
-        require(Auction_Token[tokenId].completed, "reward ended");
+        require(Auction_Token[tokenId].completed, "reward not ended");
         require(IsIn(Auction_Token[tokenId].users,msg.sender)); // as bet in this auction
         // refund
         uint256 pay = Auction_Token[tokenId].bidders[msg.sender];
         msg.sender.sendValue(pay);
+        Auction_Token[tokenId].tokenId = false;
         delete Auction_Token[tokenId].bidders[msg.sender]; // remove bidder from list
+        delete wanteedToken[msg.sender];
         // remove bidder from list payable , delate and shift to the left
-        uint index = getIndex(Auction_Token[tokenId].users,msg.sender);
-        //address payable element = Auction_Token[tokenId].users[index];
         uint Arrlength = Auction_Token[tokenId].users.length;
-        for(uint i = index; i<Arrlength-1; i++){
-            Auction_Token[tokenId].users[i] = Auction_Token[tokenId].users[i+1];
+        //uint index = getIndex(Auction_Token[tokenId].users,msg.sender);
+        uint256 index;
+        for(uint256 i = 0 ; i<Arrlength-1 ; i++) {
+            if( Auction_Token[tokenId].users[i] == msg.sender) {
+                index = i;
+        }}
+        //address payable element = Auction_Token[tokenId].users[index];
+        for(uint256 ip = index; ip<Arrlength-1; ip++){
+            Auction_Token[tokenId].users[ip] = Auction_Token[tokenId].users[ip+1];
         }
         delete Auction_Token[tokenId].users[Arrlength-1];
 
         // delete from ongoing auction
         if (Auction_Token[tokenId].users.length == 0){
-            delete auctions[Auction_Token[tokenId].number];
+            delete auctions[Auction_Token[tokenId].number-1];
             delete Auction_Token[tokenId];
             openAuction.decrement();
         }
@@ -328,12 +364,62 @@ contract farmToken is ERC721 {
     }
 
     /** 
-    function proposeToFight() public {
+    struct Fight {
+        uint256 code;
+        address payable F1;
+        uint Token_F1;
+        address payable F2;
+        uint Token_F2;
+        uint256 bet;
+        bool start;
+        bool full;
+    }
+    mapping(uint256 => Fight) Fight_Token;
+    event FightCreated(address add, uint256 code);
+    Counters.Counter FightNumber;
+    Fight[] public list_Fight;
 
+    function proposeToFight(uint256 tokenId) onlyBreeder external returns(bool success){
+        require(approve(msg.sender,tokenId),'appartenance');
+        require(!Fight_Token[tokenId].start;'ne s est pas engager');
+        FightNumber.increment();
+        uint256 code = FightNumber.current();
+        Fight memory newfight = Fight(code,msg.sender,tokenId,address(0),0,msg.value,true,false);
+        Fight_Token[code] = newfight;
+        FightCreated(msg.sender,code);
+        list_Fight.push(newfight);
+        return true;
     }
 
-    function agreeToFight() public {
-        
+    function agreeToFight(uint256 code,uint256 tokenId) onlyBreeder external returns(bool success){
+        require(Fight_Token[code].start, 'il existe un combat');
+        require(approve(msg.sender,tokenId),'appartenance');
+        require(Fight_Token[code].bet == msg.value,'même mise');
+        require(Fight_Token[code].full is false,'pas d adversaire');
+        Fight_Token[code].F2=msg.sender;
+        Fight_Token[code].Token_F2=tokenId;
+        Fight_Token[code].full=true;
+        return true;
+    }
+
+    // function automatique de combat
+    function OnFight(uint256 code) onlyBreeder external returns(bool success){
+        require(Fight_Token[code].full,'full is true');
+        cara1=characteristic[Fight_Token[code].Token_F1];
+        cara2=characteristic[Fight_Token[code].Token_F2];
+        total1 = (cara1.PV+cara1.ATK+cara1.DEF)*(rand()%100):
+        total2 = (cara2.PV+cara2.ATK+cara2.DEF)*(rand()%100):
+        if (total1 > total2) {
+            _burn(Fight_Token[code].Token_F1);
+            // send token to the winner
+            Fight_Token[code].F1.send(Fight_Token[code].bet*1,8);
+        },
+        else {
+            _burn(Fight_Token[code].Token_F2);
+            // send token to the winner
+            Fight_Token[code].F2.send(Fight_Token[code].bet*1,8);
+        }
+        return true;
     }
     */
 }
