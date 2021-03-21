@@ -62,7 +62,7 @@ truffle migrate --reset --network infura
 ```
 Once the contract is migrated , you can get the contract address in the console
 - In Metamask you can add a token with the contract address and the token will be displayed in your metamask
-- In MyCrypto choose to interact with your contract in the given testnet , then find the abi in the `build\contracts\MyToken.json` and paste it
+- In MyCrypto choose to interact with your contract in the given testnet , then find the abi in the `build\contracts\farmtoken.json` and paste it
 - Now you can interact with the contract and test it
 - In Metamask send ether to the contract address with Metamsk to get token
 
